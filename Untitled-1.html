@@ -1,0 +1,215 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Save the City — Mobile Quiz</title>
+  <style>
+    :root { --bg:#071018; --card:#0e1720; --ink:#e6f1ff; --muted:#9fb0c8; --accent:#22c55e; --danger:#ef4444; }
+    * { box-sizing: border-box; }
+    html,body { height:100%; }
+    body { margin:0; font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, "Helvetica Neue", Arial; background: radial-gradient(1200px 800px at 70% -20%, #16202b 0%, #071018 60%); color: var(--ink); display:grid; place-items:center; }
+    .wrap { width:min(640px, 96vw); }
+    .card { background: linear-gradient(180deg, #0e1720, #0b131b); border: 1px solid #1c2a38; border-radius: 18px; padding: 20px; box-shadow: 0 10px 30px rgba(0,0,0,.35); }
+    h1 { font-size: clamp(20px, 5vw, 30px); margin: 0 0 8px; letter-spacing: .3px; }
+    p { color: var(--muted); margin: 8px 0 14px; line-height: 1.55; }
+    .row { display:flex; gap:10px; flex-wrap:wrap; align-items:center; }
+    button { width:100%; border:0; background: var(--accent); color:#052612; padding: 14px 16px; border-radius: 12px; font-weight: 800; font-size:16px; cursor:pointer; transition: transform .06s ease; }
+    button:active { transform: translateY(1px); }
+    .muted { color: var(--muted); }
+    .badge { display:inline-block; padding:6px 10px; border-radius:999px; background:#0e1b26; border:1px solid #1d2a36; font-size:.85rem; color:#93c5fd }
+    .hidden { display:none }
+    .small { font-size: .9rem }
+    canvas.fx { position: fixed; inset:0; pointer-events:none; }
+
+    .quiz-q { font-size: clamp(18px, 4.5vw, 22px); font-weight: 800; color:#e6f1ff; margin: 8px 0 16px; }
+    .opts { display:grid; gap:10px; }
+    .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+    .codebox { background:#0a1219;border:1px dashed #1f2a36;border-radius:12px;padding:10px 12px;color:#a5b4fc;word-break:break-all; }
+    .center-img { display:block; margin:0 auto 14px auto; max-width:160px; }
+  </style>
+</head>
+<body>
+  <canvas class="fx" id="fx"></canvas>
+  <div class="wrap">
+    <!-- INTRO -->
+    <div class="card" id="screen-intro">
+      <div class="row" style="justify-content:space-between;align-items:center;margin-bottom:8px">
+        <h1>Save the City 🌍</h1>
+        <span class="badge">Location: <span id="loc">—</span></span>
+      </div>
+      <p class="muted">Short mobile quiz. Tap the correct answers to earn points.</p>
+      <button id="start">Start</button>
+      <details style="margin-top:14px">
+        <summary class="small">Admin notes</summary>
+        <p class="small muted">Set location with <code>?loc=RTU</code>. Questions are in the <code>questions</code> array. Deploy via GitHub Pages (root <code>index.html</code>).</p>
+        <p class="small muted">Self-tests: open console and run <code>__runTests()</code>.</p>
+      </details>
+    </div>
+
+    <!-- QUIZ -->
+    <div class="card hidden" id="screen-quiz">
+      <div class="row" style="justify-content:space-between;align-items:center;margin-bottom:4px">
+        <span class="badge">Question <span id="step">1</span>/<span id="total">3</span></span>
+        <span class="badge" id="progress">0 ⭐</span>
+      </div>
+      <div class="quiz-q" id="question">—</div>
+      <div class="opts" id="options"></div>
+    </div>
+
+    <!-- RESULT -->
+    <div class="card hidden" id="screen-result">
+      <h1>You saved <span id="saved">1.2</span> kg CO₂! 🌳</h1>
+      <img id="savedImg" class="center-img" src="" alt="CO2 saved illustration" style="display:none">
+      <p class="muted">Score: <b id="score">0/0</b></p>
+      <p class="muted">Reward points earned: <b id="earned">0</b></p>
+      <p class="muted">Total reward points on this device: <b id="totalPts">0</b></p>
+      <p class="muted">Completion code:</p>
+      <div id="claim" class="codebox mono"></div>
+    </div>
+  </div>
+
+  <script>
+    // ---- QUIZ DATA ----
+    const questions = [
+      {question: 'What reduces CO₂ the most?', options: ['Plastic recycling','Renewable energy','Fossil fuels'], answer: 'Renewable energy'},
+      {question: 'What is the best daily habit for sustainability?', options: ['Leaving lights on','Using eco mode','Printing emails'], answer: 'Using eco mode'},
+      {question: "What does 'Eco Mode' usually do?", options: ['Saves energy','Increases speed','Uses more power'], answer: 'Saves energy'}
+    ];
+
+    // ---- HELPERS ----
+    const $ = (q) => document.querySelector(q);
+    const p = new URLSearchParams(location.search);
+    const LOCATION = p.get('loc') || '—';
+
+    function must(sel, name){
+      const el = document.querySelector(sel);
+      if(!el){ throw new Error(`Missing element ${name} (${sel})`); }
+      return el;
+    }
+
+    // robust DOM-ready
+    function onReady(fn){
+      if(document.readyState === 'loading'){
+        document.addEventListener('DOMContentLoaded', fn, { once:true });
+      } else {
+        fn();
+      }
+    }
+
+    // resilient image loader (supports ?img= param, local files, cache busting)
+    function loadResultImage(){
+      const el = document.getElementById('savedImg');
+      if(!el) return;
+      const cand = [];
+      const fromParam = p.get('img');
+      if(fromParam) cand.push(fromParam);
+      cand.push('./tree_saved.jpg');
+      cand.push('./tree_saved.png');
+      cand.push('./Tree_Saved.jpg');
+      cand.push('./assets/tree_saved.jpg');
+      const tryNext = () => {
+        const src = cand.shift();
+        if(!src){ console.warn('[quiz] no result image found; leaving hidden'); return; }
+        const test = new Image();
+        test.onload = () => { el.src = src + (src.includes('?')?'&':'?') + 'v=' + Date.now(); el.style.display='block'; };
+        test.onerror = () => { console.warn('[quiz] image failed:', src); tryNext(); };
+        test.src = src;
+      };
+      tryNext();
+    }
+
+    function init(){
+      // write basic UI text
+      must('#loc','location badge').textContent = LOCATION;
+      must('#total','total counter').textContent = questions.length;
+
+      // Confetti FX setup
+      const canvas = must('#fx','confetti canvas');
+      const ctx = canvas.getContext('2d');
+      let W, H; function resize(){ W = canvas.width = innerWidth; H = canvas.height = innerHeight; } resize(); addEventListener('resize', resize);
+      function dropConfetti() {
+        const conf = Array.from({length: 200}, () => ({ x: Math.random()*W, y: -20 - Math.random()*H*0.2, s: 4 + Math.random()*6, v: 2 + Math.random()*3, r: Math.random()*Math.PI, w: 0.02 + Math.random()*0.06 }));
+        let t=0; const maxT=2000; const start=performance.now();
+        (function anim(now){ t = now - start; ctx.clearRect(0,0,W,H); conf.forEach(c=>{ c.y += c.v; c.r += c.w; if(c.y>H+16) c.y=-10; }); conf.forEach(c=>{ ctx.save(); ctx.translate(c.x,c.y); ctx.rotate(c.r); ctx.fillStyle = `hsl(${(c.x/W)*360},100%,70%)`; ctx.fillRect(-c.s/2,-c.s/2,c.s,c.s); ctx.restore(); }); if(t < maxT) requestAnimationFrame(anim); })(start);
+      }
+
+      // ---- STATE ----
+      let idx = 0, score = 0;
+      const STORAGE_POINTS_KEY = 'qrquiz_total_points_v1';
+      const getTotalPoints = () => parseInt(localStorage.getItem(STORAGE_POINTS_KEY) || '0', 10) || 0;
+      const setTotalPoints = (v) => localStorage.setItem(STORAGE_POINTS_KEY, String(v));
+
+      // ---- FLOW ----
+      must('#start','start button').addEventListener('click', () => {
+        must('#screen-intro','intro screen').classList.add('hidden');
+        must('#screen-quiz','quiz screen').classList.remove('hidden');
+        loadQ();
+      });
+
+      function loadQ(){
+        const q = questions[idx];
+        must('#step','step').textContent = idx+1;
+        must('#question','question container').textContent = q.question;
+        const opts = must('#options','options');
+        opts.innerHTML = '';
+        q.options.forEach((opt,i)=>{
+          const b = document.createElement('button');
+          b.textContent = opt;
+          b.addEventListener('click',()=>check(i));
+          opts.appendChild(b);
+        });
+      }
+
+      function flash(bg){
+        document.body.style.background = bg;
+        setTimeout(()=>{ document.body.style.background = 'radial-gradient(1200px 800px at 70% -20%, #16202b 0%, #071018 60%)'; }, 220);
+      }
+
+      function check(i){
+        const q = questions[idx];
+        const sel = q.options[i];
+        if(sel === q.answer){ score++; flash('#0f3320'); } else { flash('#2d1014'); }
+        idx++;
+        must('#progress','progress').textContent = `${score} ⭐`;
+        if(idx < questions.length) setTimeout(loadQ, 280); else setTimeout(showResult, 320);
+      }
+
+      function showResult(){
+        must('#screen-quiz','quiz screen').classList.add('hidden');
+        must('#screen-result','result screen').classList.remove('hidden');
+        must('#score','score').textContent = `${score}/${questions.length}`;
+
+        const earned = score;
+        const total = getTotalPoints() + earned;
+        setTotalPoints(total);
+        must('#earned','earned points').textContent = String(earned);
+        must('#totalPts','total points').textContent = String(total);
+
+        const stamp = new Date().toLocaleString();
+        const rand = (window.crypto && crypto.getRandomValues) ? crypto.getRandomValues(new Uint32Array(1))[0].toString(16) : Math.random().toString(16).slice(2);
+        must('#claim','completion code').textContent = `QRQUIZ-${btoa(`${stamp}|${rand}`)}`;
+        dropConfetti();
+      }
+
+      // preload result image (stays hidden if not found)
+      loadResultImage();
+
+      // expose tests
+      window.__runTests = function(){
+        const results = [];
+        const has = id => !!document.getElementById(id);
+        results.push(['has #screen-intro', has('screen-intro')]);
+        results.push(['has #screen-quiz', has('screen-quiz')]);
+        results.push(['has #screen-result', has('screen-result')]);
+        results.push(['questions length', questions.length === 3]);
+        try { loadQ(); results.push(['loadQ works', true]); } catch(e){ results.push(['loadQ works', false, e.message]); }
+        console.table(results.map(([name, ok, err]) => ({ test: name, ok, error: err || '' })));
+        return results;
+      };
+    }
+
+    onReady(init);
+  </script>
+</body>
+</html>
