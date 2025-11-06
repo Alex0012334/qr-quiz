@@ -97,22 +97,28 @@
       }
     }
 
-    // resilient image loader (supports ?img= param, local files, cache busting)
+    // Load result image when the result screen is shown.
+    // Priority: tree_saved.png in repo root; fallbacks cover param ?img= and a few common paths.
     function loadResultImage(){
       const el = document.getElementById('savedImg');
       if(!el) return;
+
       const cand = [];
+      cand.push('tree_saved.png'); // main expected file in the same repo root
       const fromParam = p.get('img');
       if(fromParam) cand.push(fromParam);
+      cand.push('./assets/tree_saved.png');
       cand.push('./tree_saved.jpg');
-      cand.push('./tree_saved.png');
       cand.push('./Tree_Saved.jpg');
-      cand.push('./assets/tree_saved.jpg');
+
       const tryNext = () => {
         const src = cand.shift();
         if(!src){ console.warn('[quiz] no result image found; leaving hidden'); return; }
         const test = new Image();
-        test.onload = () => { el.src = src + (src.includes('?')?'&':'?') + 'v=' + Date.now(); el.style.display='block'; };
+        test.onload = () => {
+          el.src = src + (src.includes('?') ? '&' : '?') + 'v=' + Date.now(); // cache-bust
+          el.style.display = 'block';
+        };
         test.onerror = () => { console.warn('[quiz] image failed:', src); tryNext(); };
         test.src = src;
       };
@@ -131,7 +137,20 @@
       function dropConfetti() {
         const conf = Array.from({length: 200}, () => ({ x: Math.random()*W, y: -20 - Math.random()*H*0.2, s: 4 + Math.random()*6, v: 2 + Math.random()*3, r: Math.random()*Math.PI, w: 0.02 + Math.random()*0.06 }));
         let t=0; const maxT=2000; const start=performance.now();
-        (function anim(now){ t = now - start; ctx.clearRect(0,0,W,H); conf.forEach(c=>{ c.y += c.v; c.r += c.w; if(c.y>H+16) c.y=-10; }); conf.forEach(c=>{ ctx.save(); ctx.translate(c.x,c.y); ctx.rotate(c.r); ctx.fillStyle = `hsl(${(c.x/W)*360},100%,70%)`; ctx.fillRect(-c.s/2,-c.s/2,c.s,c.s); ctx.restore(); }); if(t < maxT) requestAnimationFrame(anim); })(start);
+        (function anim(now){
+          t = now - start;
+          ctx.clearRect(0,0,W,H);
+          conf.forEach(c=>{ c.y += c.v; c.r += c.w; if(c.y>H+16) c.y=-10; });
+          conf.forEach(c=>{
+            ctx.save();
+            ctx.translate(c.x,c.y);
+            ctx.rotate(c.r);
+            ctx.fillStyle = `hsl(${(c.x/W)*360},100%,70%)`;
+            ctx.fillRect(-c.s/2,-c.s/2,c.s,c.s);
+            ctx.restore();
+          });
+          if(t < maxT) requestAnimationFrame(anim);
+        })(start);
       }
 
       // ---- STATE ----
@@ -178,6 +197,10 @@
       function showResult(){
         must('#screen-quiz','quiz screen').classList.add('hidden');
         must('#screen-result','result screen').classList.remove('hidden');
+
+        // show result image now
+        loadResultImage();
+
         must('#score','score').textContent = `${score}/${questions.length}`;
 
         const earned = score;
@@ -187,13 +210,16 @@
         must('#totalPts','total points').textContent = String(total);
 
         const stamp = new Date().toLocaleString();
-        const rand = (window.crypto && crypto.getRandomValues) ? crypto.getRandomValues(new Uint32Array(1))[0].toString(16) : Math.random().toString(16).slice(2);
+        const rand = (window.crypto && crypto.getRandomValues)
+          ? crypto.getRandomValues(new Uint32Array(1))[0].toString(16)
+          : Math.random().toString(16).slice(2);
         must('#claim','completion code').textContent = `QRQUIZ-${btoa(`${stamp}|${rand}`)}`;
+
         dropConfetti();
       }
 
-      // preload result image (stays hidden if not found)
-      loadResultImage();
+      // (removed) preload result image — we now load it on result show
+      // loadResultImage();
 
       // expose tests
       window.__runTests = function(){
